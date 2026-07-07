@@ -1,0 +1,76 @@
+@*
+    Página de demonstração do componente completo de e-mail (BBiEmail).
+    Configura o motor com variáveis do sistema + computados, um objeto de
+    exemplo (PedidoCliente) e um template inicial. O envio usa o IEnviadorEmail
+    registrado na DI (stub nesta demo). Harness — não faz parte da biblioteca.
+*@
+@page "/email"
+@rendermode InteractiveServer
+
+<PageTitle>BBiCore — e-mail</PageTitle>
+
+<h1>BBiCore — editor de e-mail</h1>
+
+<p class="intro">
+    Demonstra o <code>BBiEmail</code> com o objeto <code>PedidoCliente</code>. Clique com o
+    botão direito nos campos (assunto, destinatários, corpo…) para inserir marcadores dos três
+    grupos: campos do registro, variáveis do sistema e valores automáticos. O botão
+    <strong>Enviar teste</strong> aciona o serviço central de envio (nesta demo, o stub
+    responde que o envio ainda não está implementado).
+</p>
+
+<BBiEmail Template="_template"
+          TipoDados="typeof(PedidoCliente)"
+          Motor="_motor"
+          DadosExemplo="_exemplo"
+          OnSalvar="Salvar"
+          OnEnviado="Enviado" />
+
+@if (_mensagem is not null)
+{
+    <p class="status">@_mensagem</p>
+}
+
+@code {
+    /// <summary>Motor configurado com variáveis do sistema (chave/valor) e os computados padrão.</summary>
+    private readonly MotorTemplateEmail _motor = new(new Dictionary<string, string>
+    {
+        ["NomeEmpresa"] = "Banco Exemplo",
+        ["TelefoneSac"] = "0800 123 4567",
+        ["UrlPortal"] = "https://portal.exemplo.com"
+    });
+
+    /// <summary>Objeto de exemplo usado no preview e no envio de teste.</summary>
+    private readonly PedidoCliente _exemplo = new()
+    {
+        NomeCliente = "João Silva",
+        EmailCliente = "joao.silva@exemplo.com",
+        NumeroPedido = 4821,
+        Total = 1234.50m,
+        DataPedido = DateTime.Now,
+        Status = "Aprovado"
+    };
+
+    /// <summary>Template inicial (começa no modo normal, com assunto e destinatário já com marcadores).</summary>
+    private readonly ITemplateEmail _template = new TemplateEmailDto
+    {
+        Assunto = "Pedido {{NumeroPedido}} — {{Sistema.Saudacao}}, {{NomeCliente}}",
+        Destinatarios = "{{EmailCliente}}",
+        TipoDadosNome = nameof(PedidoCliente),
+        OrigemCriacao = OrigemCriacaoTemplate.Normal,
+        Classificacao = ClassificacaoEmail.Interno
+    };
+
+    /// <summary>Mensagem de status exibida após salvar/enviar.</summary>
+    private string? _mensagem;
+
+    /// <summary>Recebe o template quando o usuário salva (aqui, apenas simula a persistência).</summary>
+    /// <param name="template">Template montado.</param>
+    private void Salvar(ITemplateEmail template)
+        => _mensagem = $"Template salvo (simulado). Assunto cru: \"{template.Assunto}\", {template.Anexos.Count} anexo(s).";
+
+    /// <summary>Recebe o resultado do envio de teste.</summary>
+    /// <param name="resultado">Resultado devolvido pelo serviço de envio.</param>
+    private void Enviado(ResultadoEnvio resultado)
+        => _mensagem = resultado.Sucesso ? "E-mail enviado." : $"Envio: {resultado.Mensagem}";
+}

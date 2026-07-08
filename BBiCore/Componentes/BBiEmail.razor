@@ -21,6 +21,8 @@
     =========================================================================
 *@
 @namespace BBiCore.Componentes
+@using System.Globalization
+@using System.Text
 @using BBiCore.Email
 @implements IAsyncDisposable
 @inject IJSRuntime JS
@@ -32,7 +34,7 @@
         <input id="@_idAssunto" class="bbi-mail__input" type="text"
                value="@Template.Assunto"
                @oninput="e => AoDigitar(e, v => Template.Assunto = v)"
-               @oncontextmenu="e => AbrirMenu(e, _idAssunto)"
+               @oncontextmenu="e => AbrirMenu(e, _idAssunto, FontesCampo.Todas)"
                @oncontextmenu:preventDefault="true" />
     </div>
 
@@ -42,7 +44,7 @@
             <input id="@_idPara" class="bbi-mail__input" type="text"
                    value="@Template.Destinatarios"
                    @oninput="e => AoDigitar(e, v => Template.Destinatarios = v)"
-                   @oncontextmenu="e => AbrirMenu(e, _idPara)"
+                   @oncontextmenu="e => AbrirMenu(e, _idPara, FontesCampo.EnderecoEmail)"
                    @oncontextmenu:preventDefault="true" />
         </div>
 
@@ -64,7 +66,7 @@
             <input id="@_idCc" class="bbi-mail__input" type="text"
                    value="@Template.Cc"
                    @oninput="e => AoDigitar(e, v => Template.Cc = v)"
-                   @oncontextmenu="e => AbrirMenu(e, _idCc)"
+                   @oncontextmenu="e => AbrirMenu(e, _idCc, FontesCampo.EnderecoEmail)"
                    @oncontextmenu:preventDefault="true" />
         </div>
 
@@ -73,7 +75,7 @@
             <input id="@_idCco" class="bbi-mail__input" type="text"
                    value="@Template.Cco"
                    @oninput="e => AoDigitar(e, v => Template.Cco = v)"
-                   @oncontextmenu="e => AbrirMenu(e, _idCco)"
+                   @oncontextmenu="e => AbrirMenu(e, _idCco, FontesCampo.EnderecoEmail)"
                    @oncontextmenu:preventDefault="true" />
         </div>
     </div>
@@ -82,6 +84,13 @@
     {
         <div class="bbi-mail__aviso">
             Campos não encontrados no envelope: @string.Join(", ", _faltantesEnvelope.Select(f => "{{" + f + "}}"))
+        </div>
+    }
+
+    @if (_avisoEnderecos is not null)
+    {
+        <div class="bbi-mail__aviso bbi-mail__aviso--erro">
+            Endereços: @_avisoEnderecos
         </div>
     }
 
@@ -169,14 +178,19 @@
     {
         <div class="bbi-mail__backdrop" @onclick="FecharMenu"></div>
         <div class="bbi-mail__menu" style="left:@(_menuX)px; top:@(_menuY)px;">
-            <div class="bbi-mail__menu-titulo">Adicionar campo</div>
-            @foreach (IGrouping<GrupoCampo, CampoTemplate> grupo in _campos.GroupBy(c => c.Grupo))
+            <input @ref="_refBusca" class="bbi-mail__busca" placeholder="Buscar campo…"
+                   value="@_busca" @oninput="e => _busca = e.Value?.ToString() ?? string.Empty" />
+            @foreach (IGrouping<GrupoCampo, CampoTemplate> grupo in CamposFiltrados.GroupBy(c => c.Grupo))
             {
                 <div class="bbi-mail__menu-grupo">@RotuloGrupo(grupo.Key)</div>
                 @foreach (CampoTemplate campo in grupo)
                 {
                     <button type="button" class="bbi-mail__menu-item" @onclick="() => InserirCampo(campo)">@campo.Rotulo</button>
                 }
+            }
+            @if (!CamposFiltrados.Any())
+            {
+                <div class="bbi-mail__menu-vazio">Nenhum campo.</div>
             }
         </div>
     }
@@ -212,8 +226,23 @@
     /// <summary>Campos disponíveis para inserção.</summary>
     private IReadOnlyList<CampoTemplate> _campos = [];
 
+    /// <summary>Texto da busca do menu.</summary>
+    private string _busca = string.Empty;
+
+    /// <summary>Referência à caixa de busca (foco automático).</summary>
+    private ElementReference _refBusca;
+
+    /// <summary>Sinaliza foco da busca no próximo render.</summary>
+    private bool _focarBusca;
+
     /// <summary>Marcadores não encontrados nos campos do envelope.</summary>
     private IReadOnlyList<string> _faltantesEnvelope = [];
+
+    /// <summary>Aviso de problemas nos endereços (só com objeto de exemplo).</summary>
+    private string? _avisoEnderecos;
+
+    /// <summary>Fonte de cancelamento do debounce de validação.</summary>
+    private CancellationTokenSource? _ctsValidacao;
 
     /// <summary>Texto do novo caminho dinâmico em digitação.</summary>
     private string _novoCaminho = string.Empty;
@@ -238,6 +267,34 @@
     private IReadOnlyList<IAnexoTemplate> AnexosVisiveis
         => Template.Anexos.Where(a => a.ContentId is null).ToList();
 
+    /// <summary>Campos filtrados pela busca (nome e rótulo, sem acento/maiúscula).</summary>
+    private IEnumerable<CampoTemplate> CamposFiltrados
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_busca))
+                return _campos;
+
+            string alvo = Normalizar(_busca);
+            return _campos.Where(c => Normalizar(c.Nome).Contains(alvo) || Normalizar(c.Rotulo).Contains(alvo));
+        }
+    }
+
+    /// <summary>Remove acentos e caixa para busca insensível.</summary>
+    /// <param name="valor">Texto de entrada.</param>
+    /// <returns>Texto normalizado.</returns>
+    private static string Normalizar(string valor)
+    {
+        string decomposto = (valor ?? string.Empty).ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        StringBuilder sb = new();
+
+        foreach (char c in decomposto)
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                sb.Append(c);
+
+        return sb.ToString();
+    }
+
     /// <summary>Recalcula campos e validação do envelope quando os parâmetros mudam.</summary>
     protected override void OnParametersSet()
     {
@@ -252,6 +309,19 @@
         if (primeiraVez)
             _modulo = await JS.InvokeAsync<IJSObjectReference>(
                 "import", "./_content/BBiCore/bbiComporEmail.js");
+
+        if (_focarBusca)
+        {
+            _focarBusca = false;
+            try
+            {
+                await _refBusca.FocusAsync();
+            }
+            catch
+            {
+                // Elemento pode não estar pronto; ignora.
+            }
+        }
     }
 
     /// <summary>Grava o valor digitado no destino e revalida o envelope.</summary>
@@ -260,7 +330,7 @@
     private void AoDigitar(ChangeEventArgs e, Action<string> destino)
     {
         destino(e.Value?.ToString() ?? string.Empty);
-        AtualizarValidacaoEnvelope();
+        _ = AgendarValidacaoEnvelope();
     }
 
     /// <summary>Atualiza a classificação do template.</summary>
@@ -290,6 +360,55 @@
             Template.Cco ?? string.Empty);
 
         _faltantesEnvelope = Motor.Validar(juntos, TipoDados);
+
+        // Endereços só podem ser validados por formato depois de resolver os marcadores,
+        // então o aviso em tempo real só aparece quando há objeto de exemplo.
+        _avisoEnderecos = null;
+
+        if (DadosExemplo is not null)
+        {
+            List<string> problemas = [];
+            ChecarEndereco("Para", Template.Destinatarios, obrigatorio: true, problemas);
+            ChecarEndereco("Cc", Template.Cc, obrigatorio: false, problemas);
+            ChecarEndereco("Cco", Template.Cco, obrigatorio: false, problemas);
+
+            if (problemas.Count > 0)
+                _avisoEnderecos = string.Join(" | ", problemas);
+        }
+    }
+
+    /// <summary>Resolve um campo de endereços com o exemplo e acumula os problemas encontrados.</summary>
+    /// <param name="rotulo">Rótulo do campo (Para/Cc/Cco).</param>
+    /// <param name="campo">Texto cru do campo (com marcadores).</param>
+    /// <param name="obrigatorio">Se o campo precisa ter ao menos um endereço.</param>
+    /// <param name="saida">Lista que recebe a descrição do problema, se houver.</param>
+    private void ChecarEndereco(string rotulo, string? campo, bool obrigatorio, List<string> saida)
+    {
+        string resolvido = Motor.Resolver(campo ?? string.Empty, DadosExemplo).Texto;
+        ProblemasEndereco problemas = ValidadorEnderecos.Validar(resolvido, obrigatorio);
+
+        if (!problemas.Ok)
+            saida.Add($"{rotulo}: {problemas.Mensagem}");
+    }
+
+    /// <summary>Agenda a revalidação do envelope com debounce (evita recalcular a cada tecla).</summary>
+    private async Task AgendarValidacaoEnvelope()
+    {
+        _ctsValidacao?.Cancel();
+        CancellationTokenSource cts = new();
+        _ctsValidacao = cts;
+
+        try
+        {
+            await Task.Delay(300, cts.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        AtualizarValidacaoEnvelope();
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>Recebe um arquivo fixo e adiciona como anexo embutido.</summary>
@@ -329,12 +448,7 @@
     /// <param name="anexo">Anexo alvo.</param>
     /// <param name="e">Evento do checkbox.</param>
     private void AlternarExcluir(IAnexoTemplate anexo, ChangeEventArgs e)
-    {
-        bool valor = e.Value is bool b && b;
-
-        if (anexo is AnexoTemplateDto dto)
-            dto.ExcluirAposAnexar = valor;
-    }
+        => anexo.ExcluirAposAnexar = e.Value is bool b && b;
 
     /// <summary>Remove um anexo da lista.</summary>
     /// <param name="anexo">Anexo a remover.</param>
@@ -343,11 +457,14 @@
     /// <summary>Abre o menu de contexto na posição do clique, mirando o campo informado.</summary>
     /// <param name="e">Evento de mouse.</param>
     /// <param name="idAlvo">Id do campo onde inserir.</param>
-    private void AbrirMenu(MouseEventArgs e, string idAlvo)
+    private void AbrirMenu(MouseEventArgs e, string idAlvo, FontesCampo fontes)
     {
         _idAlvo = idAlvo;
+        _campos = ExtratorCamposTemplate.ListarTodos(TipoDados, Motor, fontes);
         _menuX = e.ClientX;
         _menuY = e.ClientY;
+        _busca = string.Empty;
+        _focarBusca = true;
         _menuAberto = true;
     }
 
@@ -378,6 +495,19 @@
     {
         if (DadosExemplo is null)
             return;
+
+        // Barreira: não envia se os endereços resolvidos tiverem problema.
+        List<string> problemas = [];
+        ChecarEndereco("Para", Template.Destinatarios, obrigatorio: true, problemas);
+        ChecarEndereco("Cc", Template.Cc, obrigatorio: false, problemas);
+        ChecarEndereco("Cco", Template.Cco, obrigatorio: false, problemas);
+
+        if (problemas.Count > 0)
+        {
+            _envioOk = false;
+            _mensagem = "Corrija os endereços — " + string.Join(" | ", problemas);
+            return;
+        }
 
         _ocupado = true;
         _mensagem = null;
@@ -414,6 +544,9 @@
     /// <summary>Libera o módulo JS ao destruir o componente.</summary>
     public async ValueTask DisposeAsync()
     {
+        _ctsValidacao?.Cancel();
+        _ctsValidacao?.Dispose();
+
         if (_modulo is not null)
         {
             try

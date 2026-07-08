@@ -19,6 +19,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Linq.Expressions;
+using System.Net.Mail;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -1395,8 +1396,8 @@ public interface IAnexoTemplate
     /// </summary>
     string? ContentId { get; }
 
-    /// <summary>Se verdadeiro, o arquivo deve ser excluído do servidor após ser anexado (limpeza).</summary>
-    bool ExcluirAposAnexar { get; }
+    /// <summary>Se verdadeiro, o arquivo deve ser excluído do servidor após ser anexado (limpeza). Editável.</summary>
+    bool ExcluirAposAnexar { get; set; }
 }
 
 /// <summary>Contrato mínimo de um template de e-mail. Cada sistema implementa na sua entidade <c>Email.Templates</c>.</summary>
@@ -1517,6 +1518,29 @@ public enum GrupoCampo
 
     /// <summary>Valor computado automático (prefixo "Sistema.").</summary>
     ValorAutomatico
+}
+
+/// <summary>Combinação de fontes de campo que um ponto de edição oferece no menu. Controla apenas o que é SUGERIDO, não a validação.</summary>
+[Flags]
+public enum FontesCampo
+{
+    /// <summary>Nenhuma fonte.</summary>
+    Nenhuma = 0,
+
+    /// <summary>Propriedades do objeto de dados.</summary>
+    Objeto = 1,
+
+    /// <summary>Variáveis cadastradas do sistema.</summary>
+    VariavelSistema = 2,
+
+    /// <summary>Valores computados automáticos (Sistema.*).</summary>
+    ValorAutomatico = 4,
+
+    /// <summary>Todas as fontes (padrão de assunto e corpo).</summary>
+    Todas = Objeto | VariavelSistema | ValorAutomatico,
+
+    /// <summary>Objeto + variáveis, sem automáticos (padrão dos campos de endereço).</summary>
+    EnderecoEmail = Objeto | VariavelSistema
 }
 
 /// <summary>Resultado da resolução de um texto: valor final e marcadores não resolvidos.</summary>
@@ -1798,16 +1822,29 @@ public static class ExtratorCamposTemplate
     /// <param name="motor">Motor já configurado com variáveis e computados.</param>
     /// <returns>Todos os campos disponíveis para inserção.</returns>
     public static IReadOnlyList<CampoTemplate> ListarTodos(Type tipoDados, MotorTemplateEmail motor)
+        => ListarTodos(tipoDados, motor, FontesCampo.Todas);
+
+    /// <summary>Monta a lista de campos filtrada pelas fontes permitidas naquele ponto de edição.</summary>
+    /// <param name="tipoDados">Tipo do objeto de dados.</param>
+    /// <param name="motor">Motor já configurado com variáveis e computados.</param>
+    /// <param name="fontes">Fontes que o campo oferece (ex.: endereços não oferecem automáticos).</param>
+    /// <returns>Campos disponíveis para inserção, conforme as fontes.</returns>
+    public static IReadOnlyList<CampoTemplate> ListarTodos(Type tipoDados, MotorTemplateEmail motor, FontesCampo fontes)
     {
         ArgumentNullException.ThrowIfNull(motor);
 
-        List<CampoTemplate> campos = [.. ListarDoObjeto(tipoDados)];
+        List<CampoTemplate> campos = [];
 
-        foreach (string nome in motor.VariaveisDisponiveis.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
-            campos.Add(new CampoTemplate(nome, nome, GrupoCampo.VariavelSistema));
+        if (fontes.HasFlag(FontesCampo.Objeto))
+            campos.AddRange(ListarDoObjeto(tipoDados));
 
-        foreach (string nome in motor.ComputadosDisponiveis.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
-            campos.Add(new CampoTemplate(nome, nome, GrupoCampo.ValorAutomatico));
+        if (fontes.HasFlag(FontesCampo.VariavelSistema))
+            foreach (string nome in motor.VariaveisDisponiveis.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+                campos.Add(new CampoTemplate(nome, nome, GrupoCampo.VariavelSistema));
+
+        if (fontes.HasFlag(FontesCampo.ValorAutomatico))
+            foreach (string nome in motor.ComputadosDisponiveis.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+                campos.Add(new CampoTemplate(nome, nome, GrupoCampo.ValorAutomatico));
 
         return campos;
     }
@@ -1969,6 +2006,10 @@ public static class ResolvedorEmail
                 ? null
                 : motor.Resolver(anexo.PadraoCaminho, dados).Texto;
 
+            // >>> SEGURANÇA (implementação do envio): 'caminho' contém valores vindos do objeto
+            // de dados. Antes de ler o arquivo, o enviador DEVE sanitizar (remover '/', '\\', '..'
+            // e caracteres inválidos) e validar que o caminho final permanece DENTRO da pasta base
+            // configurada pelo dev — senão há risco de path traversal (ler arquivo de fora da pasta).
             anexos.Add(new AnexoResolvido(
                 nome, anexo.ContentType, anexo.Conteudo, caminho, anexo.ContentId, anexo.ExcluirAposAnexar));
         }
@@ -1982,6 +2023,76 @@ public static class ResolvedorEmail
     /// <returns>Endereços individuais.</returns>
     private static IReadOnlyList<string> Separar(string valor)
         => valor.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+}
+
+/// <summary>Problemas encontrados em um campo de endereços.</summary>
+/// <param name="Vazio">Verdadeiro quando o campo é obrigatório e não tem nenhum endereço.</param>
+/// <param name="Invalidos">Endereços com formato inválido.</param>
+/// <param name="Duplicados">Endereços repetidos no mesmo campo.</param>
+public sealed record ProblemasEndereco(bool Vazio, IReadOnlyList<string> Invalidos, IReadOnlyList<string> Duplicados)
+{
+    /// <summary>Verdadeiro quando não há nenhum problema.</summary>
+    public bool Ok => !Vazio && Invalidos.Count == 0 && Duplicados.Count == 0;
+
+    /// <summary>Descrição legível dos problemas (vazia quando <see cref="Ok"/>).</summary>
+    public string Mensagem
+    {
+        get
+        {
+            List<string> partes = [];
+            if (Vazio) partes.Add("nenhum destinatário");
+            if (Invalidos.Count > 0) partes.Add("inválido(s): " + string.Join(", ", Invalidos));
+            if (Duplicados.Count > 0) partes.Add("duplicado(s): " + string.Join(", ", Duplicados));
+            return string.Join("; ", partes);
+        }
+    }
+}
+
+/// <summary>Valida campos de endereços de e-mail (formato, vazios e duplicados).</summary>
+public static class ValidadorEnderecos
+{
+    /// <summary>Valida uma lista de endereços separada por ';'.</summary>
+    /// <param name="listaSeparadaPorPontoEVirgula">Texto do campo (já resolvido, sem marcadores).</param>
+    /// <param name="obrigatorio">Se o campo precisa ter ao menos um endereço.</param>
+    /// <returns>Os problemas encontrados.</returns>
+    public static ProblemasEndereco Validar(string? listaSeparadaPorPontoEVirgula, bool obrigatorio)
+    {
+        string[] itens = (listaSeparadaPorPontoEVirgula ?? string.Empty)
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        bool vazio = obrigatorio && itens.Length == 0;
+
+        List<string> invalidos = [];
+        List<string> duplicados = [];
+        HashSet<string> vistos = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string item in itens)
+        {
+            if (!EhEmailValido(item))
+                invalidos.Add(item);
+
+            if (!vistos.Add(item) && !duplicados.Contains(item, StringComparer.OrdinalIgnoreCase))
+                duplicados.Add(item);
+        }
+
+        return new ProblemasEndereco(vazio, invalidos, duplicados);
+    }
+
+    /// <summary>Indica se um endereço tem formato de e-mail válido.</summary>
+    /// <param name="endereco">Endereço a testar.</param>
+    /// <returns>Verdadeiro se válido.</returns>
+    public static bool EhEmailValido(string? endereco)
+    {
+        if (string.IsNullOrWhiteSpace(endereco))
+            return false;
+
+        // MailAddress cobre o formato geral; exige domínio com ponto para evitar "a@b".
+        if (!MailAddress.TryCreate(endereco, out MailAddress? addr))
+            return false;
+
+        int ponto = addr.Host.LastIndexOf('.');
+        return ponto > 0 && ponto < addr.Host.Length - 1;
+    }
 }
 
 // #endregion

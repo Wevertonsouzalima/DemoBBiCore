@@ -69,3 +69,13 @@
 .bbi-mail__menu-grupo { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; padding: 8px 8px 2px; }
 .bbi-mail__menu-item { display: block; width: 100%; text-align: left; padding: 6px 8px; border: none; border-radius: 4px; background: transparent; color: #cbd5e1; cursor: pointer; font-size: 0.85rem; }
 .bbi-mail__menu-item:hover { background: #1d4ed8; color: #fff; }
+
+/* Busca no menu do envelope */
+.bbi-mail__busca {
+    width: 100%; box-sizing: border-box; margin-bottom: 6px;
+    padding: 7px 9px; border: 1px solid #334155; border-radius: 6px;
+    background: #020617; color: #e2e8f0; font-size: 0.85rem;
+}
+.bbi-mail__menu-vazio { padding: 8px; color: #64748b; font-size: 0.85rem; }
+
+.bbi-mail__aviso--erro { background: #4c0519; color: #fecdd3; border-color: #7f1d1d; }

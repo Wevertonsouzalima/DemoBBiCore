@@ -1,0 +1,57 @@
+@*
+    Demonstração do BBiExportador: exporta uma lista de PedidoCliente para
+    CSV/Excel, com seleção de colunas. Harness — não faz parte da biblioteca.
+*@
+@page "/exportar"
+@rendermode InteractiveServer
+@using DemoBBiCore.Modelos
+
+<PageTitle>BBiCore — exportação</PageTitle>
+
+<h1>BBiCore — exportação</h1>
+
+<p class="intro">
+    Exporta a lista abaixo para <strong>CSV</strong> ou <strong>Excel</strong>. As colunas são
+    descobertas automaticamente do tipo <code>PedidoCliente</code> (menos as removidas por
+    parâmetro); marque as que quiser levar. No CSV dá para escolher o separador — os campos
+    são protegidos por aspas (RFC 4180), então o separador não conflita com a vírgula decimal.
+</p>
+
+<BBiExportador T="PedidoCliente"
+               Itens="_pedidos"
+               PropriedadesRemover="_removidas"
+               NomeArquivo="pedidos"
+               NomeAba="Pedidos" />
+
+<h2 class="sub">Dados de exemplo</h2>
+<table class="preview">
+    <thead>
+        <tr><th>Cliente</th><th>E-mail</th><th>Pedido</th><th>Total</th><th>Data</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+        @foreach (PedidoCliente p in _pedidos)
+        {
+            <tr>
+                <td>@p.NomeCliente</td>
+                <td>@p.EmailCliente</td>
+                <td>@p.NumeroPedido</td>
+                <td>@p.Total.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("pt-BR"))</td>
+                <td>@p.DataPedido.ToString("dd/MM/yyyy")</td>
+                <td>@p.Status</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    /// <summary>Propriedades que não devem aparecer como opção de exportação.</summary>
+    private readonly string[] _removidas = ["EmailCliente"];
+
+    /// <summary>Lista de exemplo.</summary>
+    private readonly List<PedidoCliente> _pedidos =
+    [
+        new() { NomeCliente = "João Silva", EmailCliente = "joao@exemplo.com", NumeroPedido = 4821, Total = 1234.50m, DataPedido = new DateTime(2026, 3, 12), Status = "Aprovado" },
+        new() { NomeCliente = "Maria, a Souza", EmailCliente = "maria@exemplo.com", NumeroPedido = 4822, Total = 89.90m, DataPedido = new DateTime(2026, 3, 13), Status = "Pendente" },
+        new() { NomeCliente = "Carlos Lima", EmailCliente = "carlos@exemplo.com", NumeroPedido = 4823, Total = 15750.00m, DataPedido = new DateTime(2026, 3, 15), Status = "Aprovado" }
+    ];
+}

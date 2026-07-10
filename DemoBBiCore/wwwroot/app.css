@@ -70,3 +70,26 @@ li code { color: #93c5fd; word-break: break-all; }
 .nav a:hover { text-decoration: underline; }
 
 .status { margin-top: 16px; padding: 10px 14px; border-radius: 6px; background: #0b1225; border: 1px solid #1e293b; color: #93c5fd; font-size: 0.9rem; }
+
+/* Barra de CRUD de templates (demo de e-mail) */
+.tpl-barra { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.tpl-rotulo { font-size: 0.85rem; color: #94a3b8; }
+.tpl-select { padding: 8px 10px; border: 1px solid #334155; border-radius: 6px; background: #020617; color: #e2e8f0; font-size: 0.9rem; min-width: 220px; }
+.tpl-btn { padding: 8px 14px; border: none; border-radius: 6px; background: #334155; color: #e2e8f0; cursor: pointer; font-size: 0.85rem; }
+.tpl-btn:hover { background: #475569; }
+.tpl-btn--rem { background: #7f1d1d; color: #fecaca; }
+.tpl-btn--rem:hover { background: #991b1b; }
+
+/* Páginas de exportação e campos (demo) */
+.sub { margin-top: 24px; font-size: 1.1rem; color: #93c5fd; }
+.preview { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
+.preview th, .preview td { border: 1px solid #1e293b; padding: 6px 10px; text-align: left; }
+.preview th { background: #0b1225; color: #93c5fd; }
+.grade-campos { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+@media (max-width: 800px) { .grade-campos { grid-template-columns: 1fr; } }
+.col-campo { display: flex; flex-direction: column; gap: 14px; }
+.col-valores { padding: 14px; border: 1px solid #1e293b; border-radius: 8px; background: #0b1225; }
+.valores-titulo { font-size: 0.9rem; font-weight: 600; color: #93c5fd; }
+.col-valores ul { list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; }
+.col-valores code { background: #020617; padding: 2px 6px; border-radius: 4px; color: #6ee7b7; }
+.obs { font-size: 0.82rem; color: #94a3b8; font-style: italic; }

@@ -1,0 +1,605 @@
+@*
+    =========================================================================
+     BBiComporEmail.razor  —  Composição do corpo do e-mail (peça 2)
+    -------------------------------------------------------------------------
+     Dois modos sobre o MESMO corpo HTML (fonte única de verdade):
+       - NORMAL: imagem de cabeçalho + bloco de texto (marcadores) + rodapé.
+         Imagens viram anexos INLINE (cid:bbi-cabecalho / cid:bbi-rodape).
+       - AVANÇADO: edição livre do HTML.
+     Transição normal->avançado é só-ida; "voltar ao normal" só enquanto o HTML
+     não foi editado (comparação com o snapshot).
+
+     Preview: em MODAL estático (botão "Visualizar"), liberando a largura toda
+     para o editor. O preview é fiel — com exemplo aparece preenchido; sem
+     exemplo, os marcadores aparecem como texto puro (sem cor).
+
+     Menu de contexto "Adicionar campo": com caixa de BUSCA (filtra por nome e
+     rótulo, ignorando acento/maiúscula) e limitado às FONTES do campo (parâmetro
+     Fontes). Isso controla apenas o que é sugerido; não altera a validação.
+
+     Depende de Email.cs (mesma pasta) e do JS colocado BBiComporEmail.razor.js.
+    =========================================================================
+*@
+@namespace BBiCore.Componentes
+@using System.Globalization
+@using System.Text
+@using System.Text.RegularExpressions
+@using BBiCore.Email
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="bbi-email">
+    <div class="bbi-email__topo">
+        <div class="bbi-email__modos">
+            <span class="bbi-email__modo @(EhNormal ? "bbi-email__modo--ativo" : "")">Normal</span>
+            <span class="bbi-email__seta">→</span>
+            <span class="bbi-email__modo @(!EhNormal ? "bbi-email__modo--ativo" : "")">Avançado</span>
+        </div>
+
+        <div class="bbi-email__topo-acoes">
+            @if (EhNormal)
+            {
+                <button type="button" class="bbi-email__acao" @onclick="IrParaAvancado">Ir para o modo avançado</button>
+            }
+            else if (PodeVoltar)
+            {
+                <button type="button" class="bbi-email__acao bbi-email__acao--sec" @onclick="VoltarParaNormal">Voltar ao modo normal</button>
+            }
+            else
+            {
+                <span class="bbi-email__travado">HTML editado — o modo normal não está mais disponível.</span>
+            }
+
+            <button type="button" class="bbi-email__acao bbi-email__acao--prev" @onclick="AbrirPreview">Visualizar</button>
+        </div>
+    </div>
+
+    <div class="bbi-email__dica">
+        Clique com o botão direito no editor para <strong>adicionar um campo</strong>.
+        Para copiar, colar ou recortar, use os atalhos do teclado (Ctrl+C / Ctrl+V / Ctrl+X).
+    </div>
+
+    <div class="bbi-email__editor-area">
+        @if (EhNormal)
+        {
+            <div class="bbi-email__bloco">
+                <span class="bbi-email__rotulo">Imagem de cabeçalho</span>
+                @if (_cabecalhoDataUri is null)
+                {
+                    <InputFile OnChange="AoSubirCabecalho" accept="image/*" />
+                }
+                else
+                {
+                    <div class="bbi-email__img">
+                        <img src="@_cabecalhoDataUri" alt="cabeçalho" />
+                        <button type="button" class="bbi-email__remover" @onclick="RemoverCabecalho">Remover</button>
+                    </div>
+                }
+            </div>
+
+            <label class="bbi-email__rotulo" for="@_idNormal">Texto do e-mail</label>
+            <textarea id="@_idNormal"
+                      class="bbi-email__texto"
+                      value="@_texto"
+                      @oninput="AoDigitarTexto"
+                      @oncontextmenu="e => AbrirMenu(e, _idNormal)"
+                      @oncontextmenu:preventDefault="true"></textarea>
+
+            <div class="bbi-email__bloco">
+                <span class="bbi-email__rotulo">Imagem de rodapé</span>
+                @if (_rodapeDataUri is null)
+                {
+                    <InputFile OnChange="AoSubirRodape" accept="image/*" />
+                }
+                else
+                {
+                    <div class="bbi-email__img">
+                        <img src="@_rodapeDataUri" alt="rodapé" />
+                        <button type="button" class="bbi-email__remover" @onclick="RemoverRodape">Remover</button>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <label class="bbi-email__rotulo" for="@_idAvancado">HTML do e-mail</label>
+            <textarea id="@_idAvancado"
+                      class="bbi-email__editor"
+                      spellcheck="false"
+                      value="@Corpo"
+                      @oninput="AoDigitarHtml"
+                      @oncontextmenu="e => AbrirMenu(e, _idAvancado)"
+                      @oncontextmenu:preventDefault="true"></textarea>
+        }
+    </div>
+
+    @if (_faltantes.Count > 0)
+    {
+        <div class="bbi-email__falhas">
+            <strong>Campos não encontrados:</strong>
+            @string.Join(", ", _faltantes.Select(f => "{{" + f + "}}"))
+        </div>
+    }
+
+    @if (_menuAberto)
+    {
+        <div class="bbi-email__backdrop" @onclick="FecharMenu"></div>
+        <div class="bbi-email__menu" style="left:@(_menuX)px; top:@(_menuY)px;">
+            <input @ref="_refBusca" class="bbi-email__busca" placeholder="Buscar campo…"
+                   value="@_busca" @oninput="e => _busca = e.Value?.ToString() ?? string.Empty" />
+
+            @foreach (IGrouping<GrupoCampo, CampoTemplate> grupo in CamposFiltrados.GroupBy(c => c.Grupo))
+            {
+                <div class="bbi-email__menu-grupo">@RotuloGrupo(grupo.Key)</div>
+                @foreach (CampoTemplate campo in grupo)
+                {
+                    <button type="button" class="bbi-email__menu-item" @onclick="() => InserirCampo(campo)">@campo.Rotulo</button>
+                }
+            }
+            @if (!CamposFiltrados.Any())
+            {
+                <div class="bbi-email__menu-vazio">Nenhum campo.</div>
+            }
+        </div>
+    }
+
+    @if (_previewAberto)
+    {
+        <div class="bbi-email__modal-fundo" @onclick="FecharPreview"></div>
+        <div class="bbi-email__modal">
+            <div class="bbi-email__modal-topo">
+                <span class="bbi-email__modal-titulo">Pré-visualização</span>
+                <div class="bbi-email__modal-acoes">
+                    <button type="button" class="bbi-email__acao bbi-email__acao--sec" @onclick="AtualizarPreview">Atualizar</button>
+                    <button type="button" class="bbi-email__acao" @onclick="FecharPreview">Fechar</button>
+                </div>
+            </div>
+            <iframe class="bbi-email__modal-preview" sandbox="" srcdoc="@_previewHtml"></iframe>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Tipo do objeto de dados (ex.: PedidoCliente) que alimenta os campos e a validação. Obrigatório.</summary>
+    [Parameter, EditorRequired] public Type TipoDados { get; set; } = default!;
+
+    /// <summary>Motor configurado com variáveis e computados. Obrigatório.</summary>
+    [Parameter, EditorRequired] public MotorTemplateEmail Motor { get; set; } = default!;
+
+    /// <summary>Instância de exemplo para o preview aparecer preenchido. Se nulo, mostra os marcadores como texto.</summary>
+    [Parameter] public object? DadosExemplo { get; set; }
+
+    /// <summary>Corpo HTML do e-mail (bindável com <c>@bind-Corpo</c>).</summary>
+    [Parameter] public string Corpo { get; set; } = string.Empty;
+
+    /// <summary>Notifica mudança do corpo (par de <see cref="Corpo"/>).</summary>
+    [Parameter] public EventCallback<string> CorpoChanged { get; set; }
+
+    /// <summary>Modo de criação atual (bindável com <c>@bind-Origem</c>).</summary>
+    [Parameter] public OrigemCriacaoTemplate Origem { get; set; }
+
+    /// <summary>Notifica mudança do modo (par de <see cref="Origem"/>).</summary>
+    [Parameter] public EventCallback<OrigemCriacaoTemplate> OrigemChanged { get; set; }
+
+    /// <summary>Lista de anexos do template. O componente mantém aqui as imagens inline (cabeçalho/rodapé).</summary>
+    [Parameter] public IList<IAnexoTemplate>? Anexos { get; set; }
+
+    /// <summary>Fontes que o menu do corpo oferece. Padrão: todas.</summary>
+    [Parameter] public FontesCampo Fontes { get; set; } = FontesCampo.Todas;
+
+    /// <summary>ContentId da imagem de cabeçalho inline.</summary>
+    private const string CidCabecalho = "bbi-cabecalho";
+
+    /// <summary>ContentId da imagem de rodapé inline.</summary>
+    private const string CidRodape = "bbi-rodape";
+
+    /// <summary>Tamanho máximo de imagem inline aceita (5 MB).</summary>
+    private const long LimiteImagemBytes = 5L * 1024 * 1024;
+
+    /// <summary>Regex que casa apenas o marcador duplo (para a validação de faltantes).</summary>
+    private static readonly Regex RxMarcador =
+        new(@"\{\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*(?::(.+?))?\s*\}\}", RegexOptions.Compiled);
+
+    /// <summary>Id do textarea do modo avançado.</summary>
+    private readonly string _idAvancado = $"bbi-adv-{Guid.NewGuid():N}";
+
+    /// <summary>Id do textarea do modo normal.</summary>
+    private readonly string _idNormal = $"bbi-nor-{Guid.NewGuid():N}";
+
+    /// <summary>Campos disponíveis para inserção (conforme as fontes).</summary>
+    private IReadOnlyList<CampoTemplate> _campos = [];
+
+    /// <summary>Marcadores não encontrados (lista textual, sem cor).</summary>
+    private IReadOnlyList<string> _faltantes = [];
+
+    /// <summary>Fonte de cancelamento do debounce de validação.</summary>
+    private CancellationTokenSource? _ctsValidacao;
+
+    /// <summary>Texto do bloco do modo normal.</summary>
+    private string _texto = string.Empty;
+
+    /// <summary>Bytes da imagem de cabeçalho (quando houver).</summary>
+    private byte[]? _cabecalhoBytes;
+
+    /// <summary>Data URI da imagem de cabeçalho, para o preview.</summary>
+    private string? _cabecalhoDataUri;
+
+    /// <summary>Bytes da imagem de rodapé (quando houver).</summary>
+    private byte[]? _rodapeBytes;
+
+    /// <summary>Data URI da imagem de rodapé, para o preview.</summary>
+    private string? _rodapeDataUri;
+
+    /// <summary>Snapshot do HTML ao entrar no modo avançado (para detectar edição).</summary>
+    private string _snapshotAvancado = string.Empty;
+
+    /// <summary>Id do textarea alvo do menu.</summary>
+    private string _idAlvo = string.Empty;
+
+    /// <summary>Indica se o menu de contexto está aberto.</summary>
+    private bool _menuAberto;
+
+    /// <summary>Posição horizontal (px) do menu de contexto.</summary>
+    private double _menuX;
+
+    /// <summary>Posição vertical (px) do menu de contexto.</summary>
+    private double _menuY;
+
+    /// <summary>Texto da busca do menu.</summary>
+    private string _busca = string.Empty;
+
+    /// <summary>Referência à caixa de busca (para foco automático).</summary>
+    private ElementReference _refBusca;
+
+    /// <summary>Sinaliza que a busca deve receber foco no próximo render.</summary>
+    private bool _focarBusca;
+
+    /// <summary>Indica se o modal de preview está aberto.</summary>
+    private bool _previewAberto;
+
+    /// <summary>HTML capturado para exibição no preview.</summary>
+    private string _previewHtml = string.Empty;
+
+    /// <summary>Módulo JS de interop.</summary>
+    private IJSObjectReference? _modulo;
+
+    /// <summary>Indica se está no modo normal.</summary>
+    private bool EhNormal => Origem == OrigemCriacaoTemplate.Normal;
+
+    /// <summary>Verdadeiro quando é possível voltar ao normal (avançado e HTML intacto).</summary>
+    private bool PodeVoltar => !EhNormal && string.Equals(Corpo, _snapshotAvancado, StringComparison.Ordinal);
+
+    /// <summary>Campos filtrados pela busca (nome e rótulo, sem acento/maiúscula).</summary>
+    private IEnumerable<CampoTemplate> CamposFiltrados
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_busca))
+                return _campos;
+
+            string alvo = Normalizar(_busca);
+            return _campos.Where(c => Normalizar(c.Nome).Contains(alvo) || Normalizar(c.Rotulo).Contains(alvo));
+        }
+    }
+
+    /// <summary>Define o modo inicial: se já há HTML, abre no avançado (não dá para remontar o normal).</summary>
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrWhiteSpace(Corpo))
+            Origem = OrigemCriacaoTemplate.Avancado;
+    }
+
+    /// <summary>Recalcula os campos (conforme as fontes) e a validação quando os parâmetros mudam.</summary>
+    protected override void OnParametersSet()
+    {
+        _campos = ExtratorCamposTemplate.ListarTodos(TipoDados, Motor, Fontes);
+        AtualizarValidacao();
+    }
+
+    /// <summary>Carrega o módulo JS e trata o foco da busca após render.</summary>
+    /// <param name="primeiraVez">Se é a primeira renderização.</param>
+    protected override async Task OnAfterRenderAsync(bool primeiraVez)
+    {
+        if (primeiraVez)
+            _modulo = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/BBiCore/Email/BBiComporEmail.razor.js");
+
+        if (_focarBusca)
+        {
+            _focarBusca = false;
+            try
+            {
+                await _refBusca.FocusAsync();
+            }
+            catch
+            {
+                // Elemento pode não estar pronto; ignora.
+            }
+        }
+    }
+
+    /// <summary>Trata a digitação no editor HTML (modo avançado).</summary>
+    /// <param name="e">Evento de input.</param>
+    private async Task AoDigitarHtml(ChangeEventArgs e)
+    {
+        Corpo = e.Value?.ToString() ?? string.Empty;
+        await CorpoChanged.InvokeAsync(Corpo);
+        _ = AgendarValidacao();
+    }
+
+    /// <summary>Trata a digitação no bloco de texto (modo normal) e regenera o HTML.</summary>
+    /// <param name="e">Evento de input.</param>
+    private async Task AoDigitarTexto(ChangeEventArgs e)
+    {
+        _texto = e.Value?.ToString() ?? string.Empty;
+        await RegerarNormal();
+    }
+
+    /// <summary>Recebe a imagem de cabeçalho, guarda como anexo inline e regenera o HTML.</summary>
+    /// <param name="e">Evento do seletor de arquivo.</param>
+    private async Task AoSubirCabecalho(InputFileChangeEventArgs e)
+    {
+        (byte[] bytes, string tipo, string nome) = await LerImagem(e.File);
+        _cabecalhoBytes = bytes;
+        _cabecalhoDataUri = $"data:{tipo};base64,{Convert.ToBase64String(bytes)}";
+        SincronizarInline(CidCabecalho, bytes, tipo, nome);
+        await RegerarNormal();
+    }
+
+    /// <summary>Recebe a imagem de rodapé, guarda como anexo inline e regenera o HTML.</summary>
+    /// <param name="e">Evento do seletor de arquivo.</param>
+    private async Task AoSubirRodape(InputFileChangeEventArgs e)
+    {
+        (byte[] bytes, string tipo, string nome) = await LerImagem(e.File);
+        _rodapeBytes = bytes;
+        _rodapeDataUri = $"data:{tipo};base64,{Convert.ToBase64String(bytes)}";
+        SincronizarInline(CidRodape, bytes, tipo, nome);
+        await RegerarNormal();
+    }
+
+    /// <summary>Remove a imagem de cabeçalho.</summary>
+    private async Task RemoverCabecalho()
+    {
+        _cabecalhoBytes = null;
+        _cabecalhoDataUri = null;
+        SincronizarInline(CidCabecalho, null, null, string.Empty);
+        await RegerarNormal();
+    }
+
+    /// <summary>Remove a imagem de rodapé.</summary>
+    private async Task RemoverRodape()
+    {
+        _rodapeBytes = null;
+        _rodapeDataUri = null;
+        SincronizarInline(CidRodape, null, null, string.Empty);
+        await RegerarNormal();
+    }
+
+    /// <summary>Lê uma imagem enviada em bytes, respeitando o limite de tamanho.</summary>
+    /// <param name="arquivo">Arquivo enviado.</param>
+    /// <returns>Bytes, content-type e nome.</returns>
+    private static async Task<(byte[] Bytes, string Tipo, string Nome)> LerImagem(IBrowserFile arquivo)
+    {
+        using MemoryStream ms = new();
+        await arquivo.OpenReadStream(LimiteImagemBytes).CopyToAsync(ms);
+        string tipo = string.IsNullOrWhiteSpace(arquivo.ContentType) ? "image/png" : arquivo.ContentType;
+        return (ms.ToArray(), tipo, arquivo.Name);
+    }
+
+    /// <summary>Mantém uma entrada de imagem inline (por ContentId) em sincronia na lista de anexos.</summary>
+    /// <param name="contentId">ContentId da imagem.</param>
+    /// <param name="bytes">Bytes (nulo remove a entrada).</param>
+    /// <param name="tipo">Content-type.</param>
+    /// <param name="nome">Nome do arquivo.</param>
+    private void SincronizarInline(string contentId, byte[]? bytes, string? tipo, string nome)
+    {
+        if (Anexos is null)
+            return;
+
+        for (int i = Anexos.Count - 1; i >= 0; i--)
+            if (string.Equals(Anexos[i].ContentId, contentId, StringComparison.OrdinalIgnoreCase))
+                Anexos.RemoveAt(i);
+
+        if (bytes is not null)
+            Anexos.Add(new AnexoTemplateDto
+            {
+                Tipo = TipoAnexo.ArquivoEmbutido,
+                Conteudo = bytes,
+                ContentType = tipo,
+                NomeArquivo = nome,
+                ContentId = contentId
+            });
+    }
+
+    /// <summary>Regera o HTML do modo normal, notifica o binding e revalida.</summary>
+    private async Task RegerarNormal()
+    {
+        Corpo = GerarHtmlNormal();
+        await CorpoChanged.InvokeAsync(Corpo);
+        _ = AgendarValidacao();
+    }
+
+    /// <summary>Monta o HTML do modo normal em tabela Outlook-safe, com as imagens por cid:.</summary>
+    /// <returns>HTML do corpo.</returns>
+    private string GerarHtmlNormal()
+    {
+        StringBuilder sb = new();
+        sb.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border-collapse:collapse\">");
+
+        if (_cabecalhoBytes is not null)
+            sb.Append($"<tr><td align=\"center\" style=\"padding:0\"><img src=\"cid:{CidCabecalho}\" alt=\"\" style=\"display:block;max-width:100%;height:auto;border:0\"></td></tr>");
+
+        sb.Append("<tr><td style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#000000;padding:16px\">");
+        sb.Append(TextoParaHtml(_texto));
+        sb.Append("</td></tr>");
+
+        if (_rodapeBytes is not null)
+            sb.Append($"<tr><td align=\"center\" style=\"padding:0\"><img src=\"cid:{CidRodape}\" alt=\"\" style=\"display:block;max-width:100%;height:auto;border:0\"></td></tr>");
+
+        sb.Append("</table>");
+        return sb.ToString();
+    }
+
+    /// <summary>Converte o texto simples em HTML seguro (escapa &lt; &gt; &amp; e quebras viram &lt;br&gt;), preservando os marcadores.</summary>
+    /// <param name="texto">Texto do usuário.</param>
+    /// <returns>Fragmento HTML.</returns>
+    private static string TextoParaHtml(string texto)
+    {
+        string escapado = System.Net.WebUtility.HtmlEncode(texto ?? string.Empty);
+        escapado = escapado.Replace("\r\n", "\n").Replace("\r", "\n");
+        return escapado.Replace("\n", "<br>\n");
+    }
+
+    /// <summary>Entra no modo avançado, guardando o snapshot para permitir a volta enquanto intacto.</summary>
+    private async Task IrParaAvancado()
+    {
+        _snapshotAvancado = Corpo;
+        Origem = OrigemCriacaoTemplate.Avancado;
+        await OrigemChanged.InvokeAsync(Origem);
+    }
+
+    /// <summary>Volta ao modo normal (só permitido quando o HTML não foi editado).</summary>
+    private async Task VoltarParaNormal()
+    {
+        if (!PodeVoltar)
+            return;
+
+        Origem = OrigemCriacaoTemplate.Normal;
+        await OrigemChanged.InvokeAsync(Origem);
+    }
+
+    /// <summary>Abre o menu de contexto na posição do clique, limpando a busca e pedindo foco.</summary>
+    /// <param name="e">Evento de mouse.</param>
+    /// <param name="idAlvo">Id do textarea onde inserir.</param>
+    private void AbrirMenu(MouseEventArgs e, string idAlvo)
+    {
+        _idAlvo = idAlvo;
+        _menuX = e.ClientX;
+        _menuY = e.ClientY;
+        _busca = string.Empty;
+        _focarBusca = true;
+        _menuAberto = true;
+    }
+
+    /// <summary>Fecha o menu de contexto.</summary>
+    private void FecharMenu() => _menuAberto = false;
+
+    /// <summary>Insere o marcador do campo no textarea alvo, via interop.</summary>
+    /// <param name="campo">Campo selecionado.</param>
+    private async Task InserirCampo(CampoTemplate campo)
+    {
+        _menuAberto = false;
+
+        if (_modulo is not null && !string.IsNullOrEmpty(_idAlvo))
+            await _modulo.InvokeVoidAsync("inserirNoCursor", _idAlvo, "{{" + campo.Nome + "}}");
+    }
+
+    /// <summary>Abre o modal de preview capturando o estado atual do corpo.</summary>
+    private void AbrirPreview()
+    {
+        AtualizarPreview();
+        _previewAberto = true;
+    }
+
+    /// <summary>Recalcula o HTML do preview (retrato do momento) — resolvido com exemplo, ou fiel sem cor.</summary>
+    private void AtualizarPreview()
+    {
+        string baseHtml = ResolverCidsParaPreview(Corpo);
+        _previewHtml = DadosExemplo is not null
+            ? Motor.Resolver(baseHtml, DadosExemplo).Texto
+            : baseHtml;
+    }
+
+    /// <summary>Fecha o modal de preview.</summary>
+    private void FecharPreview() => _previewAberto = false;
+
+    /// <summary>Recalcula a lista de marcadores não encontrados (sem colorir nada).</summary>
+    private void AtualizarValidacao()
+        => _faltantes = Motor.Validar(Corpo, TipoDados);
+
+    /// <summary>Agenda a revalidação com debounce (evita recalcular a cada tecla no circuito).</summary>
+    private async Task AgendarValidacao()
+    {
+        _ctsValidacao?.Cancel();
+        CancellationTokenSource cts = new();
+        _ctsValidacao = cts;
+
+        try
+        {
+            await Task.Delay(300, cts.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        AtualizarValidacao();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Substitui as referências cid: das imagens inline por data URI, só para o preview.</summary>
+    /// <param name="html">HTML do corpo.</param>
+    /// <returns>HTML com imagens visíveis no preview.</returns>
+    private string ResolverCidsParaPreview(string html)
+    {
+        if (_cabecalhoDataUri is not null)
+            html = html.Replace($"cid:{CidCabecalho}", _cabecalhoDataUri);
+
+        if (_rodapeDataUri is not null)
+            html = html.Replace($"cid:{CidRodape}", _rodapeDataUri);
+
+        return html;
+    }
+
+    /// <summary>Remove acentos e caixa para busca insensível.</summary>
+    /// <param name="valor">Texto de entrada.</param>
+    /// <returns>Texto normalizado.</returns>
+    private static string Normalizar(string valor)
+    {
+        string decomposto = (valor ?? string.Empty).ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        StringBuilder sb = new();
+
+        foreach (char c in decomposto)
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                sb.Append(c);
+
+        return sb.ToString();
+    }
+
+    /// <summary>Rótulo amigável do grupo de campos no menu.</summary>
+    /// <param name="grupo">Grupo do campo.</param>
+    /// <returns>Texto do cabeçalho do grupo.</returns>
+    private static string RotuloGrupo(GrupoCampo grupo)
+    {
+        switch (grupo)
+        {
+            case GrupoCampo.Objeto:
+                return "Campos do registro";
+            case GrupoCampo.VariavelSistema:
+                return "Variáveis do sistema";
+            case GrupoCampo.ValorAutomatico:
+                return "Valores automáticos";
+            default:
+                return "Campos";
+        }
+    }
+
+    /// <summary>Libera o módulo JS ao destruir o componente.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        _ctsValidacao?.Cancel();
+        _ctsValidacao?.Dispose();
+
+        if (_modulo is not null)
+        {
+            try
+            {
+                await _modulo.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuito já encerrado; nada a fazer.
+            }
+        }
+    }
+}

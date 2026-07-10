@@ -1,23 +1,42 @@
 @*
-    Página de demonstração do componente completo de e-mail (BBiEmail).
-    Configura o motor com variáveis do sistema + computados, um objeto de
-    exemplo (PedidoCliente) e um template inicial. O envio usa o IEnviadorEmail
-    registrado na DI (stub nesta demo). Harness — não faz parte da biblioteca.
+    Demonstração completa do módulo de e-mail: editor (BBiEmail) + persistência
+    de templates (IRepositorioTemplateEmail, em memória nesta demo) + envio
+    (IEnviadorEmail simulado, grava .eml). Harness — não faz parte da biblioteca.
 *@
 @page "/email"
 @rendermode InteractiveServer
+@using BBiCore.Email
+@using DemoBBiCore.Modelos
+@inject IRepositorioTemplateEmail Repositorio
 
 <PageTitle>BBiCore — e-mail</PageTitle>
 
 <h1>BBiCore — editor de e-mail</h1>
 
 <p class="intro">
-    Demonstra o <code>BBiEmail</code> com o objeto <code>PedidoCliente</code>. Clique com o
-    botão direito nos campos (assunto, destinatários, corpo…) para inserir marcadores dos três
-    grupos: campos do registro, variáveis do sistema e valores automáticos. O botão
-    <strong>Enviar teste</strong> aciona o serviço central de envio (nesta demo, o stub
-    responde que o envio ainda não está implementado).
+    Editor completo com <strong>persistência</strong> e <strong>envio</strong>. Salvar grava o
+    template no repositório (aqui em memória); o botão <strong>Enviar teste</strong> aciona o
+    <code>EnviadorEmailSimulado</code>, que grava o e-mail montado como <code>.eml</code> na pasta
+    <code>emails-simulados</code> (raiz do app) — abra no Outlook para conferir corpo, imagens
+    inline e anexos. Em produção, troque o repositório por EF e o enviador por
+    <code>EnviadorEmailExchange</code> no <code>Program.cs</code>, sem mudar o componente.
 </p>
+
+<div class="tpl-barra">
+    <label class="tpl-rotulo">Templates salvos:</label>
+    <select class="tpl-select" @onchange="AoSelecionar" value="@_selecionado">
+        <option value="">(novo template)</option>
+        @foreach (string nome in _nomes)
+        {
+            <option value="@nome">@nome</option>
+        }
+    </select>
+    <button type="button" class="tpl-btn" @onclick="Novo">Novo</button>
+    @if (!string.IsNullOrEmpty(_selecionado))
+    {
+        <button type="button" class="tpl-btn tpl-btn--rem" @onclick="Excluir">Excluir</button>
+    }
+</div>
 
 <BBiEmail Template="_template"
           TipoDados="typeof(PedidoCliente)"
@@ -37,7 +56,8 @@
     {
         ["NomeEmpresa"] = "Banco Exemplo",
         ["TelefoneSac"] = "0800 123 4567",
-        ["UrlPortal"] = "https://portal.exemplo.com"
+        ["UrlPortal"] = "https://portal.exemplo.com",
+        ["EmailGenerico"] = "copias@bancoexemplo.com"
     });
 
     /// <summary>Objeto de exemplo usado no preview e no envio de teste.</summary>
@@ -51,26 +71,98 @@
         Status = "Aprovado"
     };
 
-    /// <summary>Template inicial (começa no modo normal, com assunto e destinatário já com marcadores).</summary>
-    private readonly ITemplateEmail _template = new TemplateEmailDto
-    {
-        Assunto = "Pedido {{NumeroPedido}} — {{Sistema.Saudacao}}, {{NomeCliente}}",
-        Destinatarios = "{{EmailCliente}}",
-        TipoDadosNome = nameof(PedidoCliente),
-        OrigemCriacao = OrigemCriacaoTemplate.Normal,
-        Classificacao = ClassificacaoEmail.Interno
-    };
+    /// <summary>Template em edição.</summary>
+    private ITemplateEmail _template = NovoTemplate();
 
-    /// <summary>Mensagem de status exibida após salvar/enviar.</summary>
+    /// <summary>Nomes de templates salvos.</summary>
+    private IReadOnlyList<string> _nomes = [];
+
+    /// <summary>Nome do template selecionado na lista ("" = novo).</summary>
+    private string _selecionado = string.Empty;
+
+    /// <summary>Mensagem de status exibida após salvar/enviar/excluir.</summary>
     private string? _mensagem;
 
-    /// <summary>Recebe o template quando o usuário salva (aqui, apenas simula a persistência).</summary>
-    /// <param name="template">Template montado.</param>
-    private void Salvar(ITemplateEmail template)
-        => _mensagem = $"Template salvo (simulado). Assunto cru: \"{template.Assunto}\", {template.Anexos.Count} anexo(s).";
+    /// <summary>Carrega a lista de templates ao abrir a página.</summary>
+    protected override async Task OnInitializedAsync()
+        => await RecarregarNomes();
+
+    /// <summary>Cria um template novo, já com marcadores de exemplo.</summary>
+    /// <returns>Template inicial.</returns>
+    private static ITemplateEmail NovoTemplate()
+        => new TemplateEmailDto
+        {
+            Nome = string.Empty,
+            Assunto = "Pedido {{NumeroPedido}} — {{Sistema.Saudacao}}, {{NomeCliente}}",
+            Destinatarios = "{{EmailCliente}}",
+            Cc = "{{EmailGenerico}}",
+            TipoDadosNome = nameof(PedidoCliente),
+            OrigemCriacao = OrigemCriacaoTemplate.Normal,
+            Classificacao = ClassificacaoEmail.Interno
+        };
+
+    /// <summary>Recarrega os nomes de templates do repositório.</summary>
+    private async Task RecarregarNomes()
+        => _nomes = await Repositorio.ListarNomesAsync();
+
+    /// <summary>Começa um template novo, em branco.</summary>
+    private void Novo()
+    {
+        _template = NovoTemplate();
+        _selecionado = string.Empty;
+        _mensagem = null;
+    }
+
+    /// <summary>Carrega o template selecionado na lista.</summary>
+    /// <param name="e">Evento de mudança do select.</param>
+    private async Task AoSelecionar(ChangeEventArgs e)
+    {
+        _selecionado = e.Value?.ToString() ?? string.Empty;
+        _mensagem = null;
+
+        if (string.IsNullOrEmpty(_selecionado))
+        {
+            _template = NovoTemplate();
+            return;
+        }
+
+        ITemplateEmail? achado = await Repositorio.ObterAsync(_selecionado);
+        if (achado is not null)
+            _template = achado;
+    }
+
+    /// <summary>Salva o template no repositório.</summary>
+    /// <param name="template">Template montado pelo componente.</param>
+    private async Task Salvar(ITemplateEmail template)
+    {
+        if (string.IsNullOrWhiteSpace(template.Nome))
+        {
+            _mensagem = "Dê um nome ao template antes de salvar.";
+            return;
+        }
+
+        await Repositorio.SalvarAsync(template);
+        await RecarregarNomes();
+        _selecionado = template.Nome;
+        _mensagem = $"Template \"{template.Nome}\" salvo ({template.Anexos.Count} anexo(s)).";
+    }
+
+    /// <summary>Exclui o template selecionado.</summary>
+    private async Task Excluir()
+    {
+        if (string.IsNullOrEmpty(_selecionado))
+            return;
+
+        await Repositorio.ExcluirAsync(_selecionado);
+        await RecarregarNomes();
+        _mensagem = $"Template \"{_selecionado}\" excluído.";
+        Novo();
+    }
 
     /// <summary>Recebe o resultado do envio de teste.</summary>
     /// <param name="resultado">Resultado devolvido pelo serviço de envio.</param>
     private void Enviado(ResultadoEnvio resultado)
-        => _mensagem = resultado.Sucesso ? "E-mail enviado." : $"Envio: {resultado.Mensagem}";
+        => _mensagem = resultado.Sucesso
+            ? "E-mail simulado gerado (.eml) na pasta emails-simulados."
+            : $"Envio: {resultado.Mensagem}";
 }

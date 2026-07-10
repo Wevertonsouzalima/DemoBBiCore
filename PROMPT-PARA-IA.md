@@ -59,9 +59,19 @@ para projetos Blazor Server internos. Reúne três módulos independentes:
 
 ## Estado atual / pendências
 
-- `EnviadorEmailNaoImplementado` é um **stub**. Falta a implementação real com Exchange
-  (materializar anexos de caminho, aplicar política de falha e exclusão pós-anexo).
-- Falta o contrato de repositório de templates (`IRepositorioTemplateEmail`) por sistema.
+- **Envio implementado**: `EnviadorEmailBase` monta o MIME (corpo HTML, imagens inline
+  por cid:, anexos das formas 1 e 3, sensibilidade, política de falha, sanitização contra
+  path traversal, exclusão pós-anexo). `EnviadorEmailExchange` envia via SMTP com as
+  credenciais de `OpcoesEmail`; `EnviadorEmailSimulado` grava o .eml em disco (testes).
+  Cada sistema tem seu grupo em `OpcoesEmail` (remetente, usuário, senha, servidor).
+  Observação: usa `System.Net.Mail.SmtpClient` (nativo, zero dependência). Se quiser o
+  caminho mais moderno, dá para trocar a ENTREGA por MailKit ou Microsoft Graph
+  implementando a mesma `IEnviadorEmail` — o resto não muda.
+- **Persistência implementada**: contrato `IRepositorioTemplateEmail` (ListarNomes/Obter/
+  Salvar/Excluir) + implementação de referência `RepositorioTemplateEmailMemoria` (thread-safe,
+  cópia defensiva). Em produção, cada sistema implementa com EF Core na tabela local. Salvar
+  continua sendo do consumidor: o componente dispara `OnSalvar`; a página chama o repositório.
+- Não há mais pendências estruturais conhecidas — os três módulos estão completos.
 
 ## Tarefas comuns que você pode receber
 

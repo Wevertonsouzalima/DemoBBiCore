@@ -5,6 +5,8 @@
 // =============================================================================
 
 using BBiCore.Email;
+using BBiCore.Templates;
+using DemoBBiCore;
 using DemoBBiCore.Components;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -28,16 +30,66 @@ opcoesEmail.PastaSimulacao = Path.Combine(builder.Environment.ContentRootPath, "
 
 builder.Services.AddSingleton(opcoesEmail);
 
-// Envio centralizado. Nesta demo, o SIMULADO grava o .eml em disco (sem servidor).
-// Em produção, troque por EnviadorEmailExchange — mesma interface, mesma configuração.
-builder.Services.AddScoped<IEnviadorEmail, EnviadorEmailSimulado>();
-// builder.Services.AddScoped<IEnviadorEmail, EnviadorEmailExchange>();
+// -----------------------------------------------------------------------------
+// ENVIO DE E-MAIL — arquitetura por composição:
+//   IServicoEmail (o que o dev usa)  ->  ITransporteEmail (quem entrega)
+//
+// Escolha UM transporte. Trocar é trocar esta linha; nada mais muda.
+// -----------------------------------------------------------------------------
+
+// Desenvolvimento: grava o .eml em disco, sem servidor nenhum.
+builder.Services.AddScoped<ITransporteEmail, TransporteSimulado>();
+
+// Produção — SMTP (MailKit). Precisa de um relay SMTP que aceite a conta do sistema:
+//   builder.Services.AddScoped<ITransporteEmail, TransporteSmtp>();
+//
+// Produção — Exchange (EWS). Usa a URL do EWS e as credenciais do sistema:
+//   builder.Services.AddScoped<ITransporteEmail, TransporteExchange>();
+
+// A fachada que o dev injeta para enviar (avulso, por template salvo, ou template em mãos).
+builder.Services.AddScoped<IServicoEmail>(sp => new ServicoEmail(
+    sp.GetRequiredService<ITransporteEmail>(),
+    sp.GetRequiredService<OpcoesEmail>(),
+    sp.GetRequiredService<MotorTemplate>(),
+    sp.GetService<IRepositorioTemplateEmail>(),
+    sp.GetService<ServicoAnexos>()));
+
+// Motor de marcadores usado no envio POR TEMPLATE (o avulso não usa: lá o texto é literal).
+builder.Services.AddSingleton(new MotorTemplate(new Dictionary<string, string>
+{
+    ["NomeSistema"] = "Sistema de Pedidos",
+    ["Area"] = "Central de Atendimento"
+}));
+
+// CREDENCIAIS — a aplicação NÃO fornece credencial. Ela apenas se identifica
+// (OpcoesEmail.NomeSistema, no appsettings) e a biblioteca busca o cadastro do app
+// no banco centralizador (ver BBiCore/Email/CadastroSistema.cs).
+builder.Services.AddScoped<CadastroSistema>();
+
+// ACERVO DE ANEXOS — em memória nesta demo. Em produção, implemente IRepositorioAnexos
+// contra as suas tabelas (script em BBiCore/Email/BBiCore-Email.sql).
+builder.Services.AddSingleton<IRepositorioAnexos, RepositorioAnexosMemoria>();
+builder.Services.AddScoped<ServicoAnexos>();
+
+// LOG — todo envio é registrado pela própria biblioteca (sucesso e falha), sem
+// que a aplicação precise fazer nada (ver BBiCore/Email/LogEmail.cs).
+
+builder.Services.AddSingleton(new MotorTemplate(new Dictionary<string, string>
+{
+    ["NomeSistema"] = "Sistema de Pedidos",
+    ["Area"] = "Central de Atendimento"
+}));
+
+// CREDENCIAIS — quando vierem do cadastro do aplicativo (com a senha criptografada),
 
 // Persistência de templates. Nesta demo, em memória (some ao reiniciar o app).
 // Em produção, implemente IRepositorioTemplateEmail com EF Core na tabela do sistema.
 builder.Services.AddSingleton<IRepositorioTemplateEmail, RepositorioTemplateEmailMemoria>();
 
 var app = builder.Build();
+
+// Semeia o acervo de anexos com exemplos (só na demonstração).
+await SemeadorAcervo.SemearAsync(app.Services.GetRequiredService<IRepositorioAnexos>());
 
 app.UseStaticFiles();
 app.UseAntiforgery();

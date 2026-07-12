@@ -16,3 +16,6 @@
 .bbi-exp__botao:hover { background: #059669; }
 .bbi-exp__botao:disabled { opacity: 0.5; cursor: default; }
 .bbi-exp__nota { font-size: 0.8rem; color: #64748b; font-style: italic; }
+/* Opções específicas do PDF. */
+.bbi-exp__pdf { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+.bbi-exp__titulo-campo { padding: 6px 8px; border: 1px solid #334155; border-radius: 6px; background: #020617; color: #e2e8f0; font-size: 0.85rem; min-width: 220px; }

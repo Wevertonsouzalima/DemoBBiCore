@@ -11,7 +11,9 @@
 <h1>BBiCore — exportação</h1>
 
 <p class="intro">
-    Exporta a lista abaixo para <strong>CSV</strong> ou <strong>Excel</strong>. As colunas são
+    Exporta a lista abaixo (@_pedidos.Count registros) para <strong>CSV</strong>, <strong>Excel</strong>
+    ou <strong>PDF</strong>. No PDF, repare: o componente avisa antes de gerar como a página vai sair
+    (orientação e fonte), o cabeçalho se repete em toda página e o rodapé numera "página X de Y". As colunas são
     descobertas automaticamente do tipo <code>PedidoCliente</code> (menos as removidas por
     parâmetro); marque as que quiser levar. No CSV dá para escolher o separador — os campos
     são protegidos por aspas (RFC 4180), então o separador não conflita com a vírgula decimal.
@@ -21,15 +23,17 @@
                Itens="_pedidos"
                PropriedadesRemover="_removidas"
                NomeArquivo="pedidos"
-               NomeAba="Pedidos" />
+               NomeAba="Pedidos"
+               TituloPdf="Relatório de pedidos"
+               SubtituloPdf="Gerado pelo Sistema de Pedidos" />
 
-<h2 class="sub">Dados de exemplo</h2>
+<h2 class="sub">Dados de exemplo (mostrando 5 de @_pedidos.Count)</h2>
 <table class="preview">
     <thead>
         <tr><th>Cliente</th><th>E-mail</th><th>Pedido</th><th>Total</th><th>Data</th><th>Status</th></tr>
     </thead>
     <tbody>
-        @foreach (PedidoCliente p in _pedidos)
+        @foreach (PedidoCliente p in _pedidos.Take(5))
         {
             <tr>
                 <td>@p.NomeCliente</td>
@@ -47,11 +51,28 @@
     /// <summary>Propriedades que não devem aparecer como opção de exportação.</summary>
     private readonly string[] _removidas = ["EmailCliente"];
 
-    /// <summary>Lista de exemplo.</summary>
-    private readonly List<PedidoCliente> _pedidos =
-    [
-        new() { NomeCliente = "João Silva", EmailCliente = "joao@exemplo.com", NumeroPedido = 4821, Total = 1234.50m, DataPedido = new DateTime(2026, 3, 12), Status = "Aprovado" },
-        new() { NomeCliente = "Maria, a Souza", EmailCliente = "maria@exemplo.com", NumeroPedido = 4822, Total = 89.90m, DataPedido = new DateTime(2026, 3, 13), Status = "Pendente" },
-        new() { NomeCliente = "Carlos Lima", EmailCliente = "carlos@exemplo.com", NumeroPedido = 4823, Total = 15750.00m, DataPedido = new DateTime(2026, 3, 15), Status = "Aprovado" }
-    ];
+    /// <summary>Lista de exemplo — com volume suficiente para o PDF paginar e repetir o cabeçalho.</summary>
+    private readonly List<PedidoCliente> _pedidos = GerarPedidos();
+
+    /// <summary>Gera 60 pedidos de exemplo (o bastante para o PDF ter várias páginas).</summary>
+    /// <returns>Lista de pedidos.</returns>
+    private static List<PedidoCliente> GerarPedidos()
+    {
+        string[] nomes = ["João Silva", "Maria, a Souza", "Carlos Lima", "Ana Pereira", "Rui Barbosa", "Clara Nunes"];
+        string[] situacoes = ["Aprovado", "Pendente", "Cancelado", "Em separação"];
+        List<PedidoCliente> lista = [];
+
+        for (int i = 0; i < 60; i++)
+            lista.Add(new PedidoCliente
+            {
+                NomeCliente = nomes[i % nomes.Length],
+                EmailCliente = $"cliente{i + 1}@exemplo.com",
+                NumeroPedido = 4821 + i,
+                Total = 89.90m + (i * 137.45m),
+                DataPedido = new DateTime(2026, 3, 1).AddDays(i),
+                Status = situacoes[i % situacoes.Length]
+            });
+
+        return lista;
+    }
 }

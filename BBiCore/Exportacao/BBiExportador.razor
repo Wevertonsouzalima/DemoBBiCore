@@ -53,6 +53,11 @@
                        @onchange="() => _formato = FormatoExportacao.Excel" />
                 Excel (.xlsx)
             </label>
+            <label class="bbi-exp__radio">
+                <input type="radio" name="fmt" checked="@(_formato == FormatoExportacao.Pdf)"
+                       @onchange="() => _formato = FormatoExportacao.Pdf" />
+                PDF (.pdf)
+            </label>
 
             @if (_formato == FormatoExportacao.Csv)
             {
@@ -66,12 +71,39 @@
                     </select>
                 </label>
             }
+
+            @if (_formato == FormatoExportacao.Pdf)
+            {
+                <label class="bbi-exp__sep">
+                    Orientação:
+                    <select @onchange="AoMudarOrientacao" value="@_orientacao">
+                        <option value="@OrientacaoPdf.Automatica">automática</option>
+                        <option value="@OrientacaoPdf.Retrato">retrato</option>
+                        <option value="@OrientacaoPdf.Paisagem">paisagem</option>
+                    </select>
+                </label>
+            }
         </div>
+
+        @if (_formato == FormatoExportacao.Pdf)
+        {
+            <div class="bbi-exp__pdf">
+                <label class="bbi-exp__sep">
+                    Título:
+                    <input type="text" class="bbi-exp__titulo-campo" placeholder="Título do relatório"
+                           value="@_tituloPdf" @oninput="e => _tituloPdf = e.Value?.ToString() ?? string.Empty" />
+                </label>
+
+                <span class="bbi-exp__nota">
+                    @DescricaoLayoutPdf
+                </span>
+            </div>
+        }
     </div>
 
     <div class="bbi-exp__rodape">
         <button type="button" class="bbi-exp__botao" @onclick="Exportar" disabled="@(_ocupado || NenhumaSelecionada)">
-            Exportar @(_formato == FormatoExportacao.Csv ? "CSV" : "Excel")
+            Exportar @NomeFormato
         </button>
         @if (NenhumaSelecionada)
         {
@@ -93,6 +125,12 @@
     /// <summary>Nome da planilha, quando Excel.</summary>
     [Parameter] public string NomeAba { get; set; } = "Dados";
 
+    /// <summary>Título impresso no topo do PDF. O usuário pode ajustá-lo na tela.</summary>
+    [Parameter] public string TituloPdf { get; set; } = string.Empty;
+
+    /// <summary>Subtítulo opcional do PDF (ex.: período, filtro aplicado).</summary>
+    [Parameter] public string? SubtituloPdf { get; set; }
+
     /// <summary>Colunas descobertas por reflexão.</summary>
     private IReadOnlyList<ColunaExportacao<T>> _colunas = [];
 
@@ -105,6 +143,12 @@
     /// <summary>Separador de campo do CSV.</summary>
     private char _separador = ';';
 
+    /// <summary>Orientação escolhida para o PDF.</summary>
+    private OrientacaoPdf _orientacao = OrientacaoPdf.Automatica;
+
+    /// <summary>Título do PDF em edição.</summary>
+    private string _tituloPdf = string.Empty;
+
     /// <summary>Indica exportação em andamento.</summary>
     private bool _ocupado;
 
@@ -114,10 +158,31 @@
     /// <summary>Verdadeiro quando nenhuma coluna está marcada.</summary>
     private bool NenhumaSelecionada => !_selecao.Values.Any(v => v);
 
+    /// <summary>Nome do formato escolhido, exibido no botão.</summary>
+    private string NomeFormato
+    {
+        get
+        {
+            switch (_formato)
+            {
+                case FormatoExportacao.Csv:
+                    return "CSV";
+                case FormatoExportacao.Pdf:
+                    return "PDF";
+                case FormatoExportacao.Excel:
+                default:
+                    return "Excel";
+            }
+        }
+    }
+
     /// <summary>Descobre as colunas e inicializa a seleção (todas marcadas).</summary>
     protected override void OnParametersSet()
     {
         _colunas = ExportadorTabular.DescobrirColunas<T>(PropriedadesRemover);
+
+        if (string.IsNullOrEmpty(_tituloPdf) && !string.IsNullOrEmpty(TituloPdf))
+            _tituloPdf = TituloPdf;
 
         foreach (ColunaExportacao<T> coluna in _colunas)
             if (!_selecao.ContainsKey(coluna.Nome))
@@ -155,6 +220,38 @@
         _separador = string.IsNullOrEmpty(valor) ? ';' : valor[0];
     }
 
+    /// <summary>Atualiza a orientação do PDF.</summary>
+    /// <param name="e">Evento de mudança.</param>
+    private void AoMudarOrientacao(ChangeEventArgs e)
+    {
+        if (Enum.TryParse(e.Value?.ToString(), out OrientacaoPdf valor))
+            _orientacao = valor;
+    }
+
+    /// <summary>Explica ao usuário como a página vai sair (orientação e ajuste de fonte), antes de gerar.</summary>
+    private string DescricaoLayoutPdf
+    {
+        get
+        {
+            int selecionadas = _selecao.Count(par => par.Value);
+
+            if (selecionadas == 0)
+                return string.Empty;
+
+            OpcoesPdf previa = new() { Orientacao = _orientacao };
+
+            OrientacaoPdf efetiva = ExportadorPdf.DecidirOrientacao(selecionadas, previa);
+            double fonte = ExportadorPdf.CalcularTamanhoFonte(selecionadas, previa);
+
+            string layout = efetiva == OrientacaoPdf.Paisagem ? "paisagem" : "retrato";
+            string aviso = fonte <= previa.TamanhoFonteMinimo
+                ? " — com muitas colunas, o texto quebra dentro da célula"
+                : string.Empty;
+
+            return $"{selecionadas} coluna(s) → {layout}, fonte {fonte:0.#} pt{aviso}";
+        }
+    }
+
     /// <summary>Gera o arquivo com as colunas selecionadas e dispara o download.</summary>
     private async Task Exportar()
     {
@@ -178,6 +275,17 @@
                     bytes = ExportadorTabular.ParaCsv(Itens, selecionadas, opcoes);
                     extensao = "csv";
                     mime = "text/csv";
+                    break;
+                case FormatoExportacao.Pdf:
+                    OpcoesPdf opcoesPdf = new()
+                    {
+                        Titulo = _tituloPdf,
+                        Subtitulo = SubtituloPdf,
+                        Orientacao = _orientacao
+                    };
+                    bytes = ExportadorPdf.Gerar(Itens, selecionadas, opcoesPdf);
+                    extensao = "pdf";
+                    mime = "application/pdf";
                     break;
                 case FormatoExportacao.Excel:
                 default:

@@ -18,9 +18,19 @@
     da direita mostra exatamente o que o binding capturou.
 </p>
 
+<div class="aviso-cnpj">
+    <strong>CNPJ alfanumérico já suportado</strong> (IN RFB 2.229/2024, vigente desde julho/2026):
+    12 caracteres alfanuméricos + 2 dígitos verificadores numéricos. Teste com o exemplo oficial
+    <code>12.ABC.345/01DE-35</code> (válido) — e note que o CNPJ numérico de sempre continua valendo
+    (<code>11.222.333/0001-81</code>). O valor cru do CNPJ <strong>tem letras</strong>: guarde como
+    texto no banco, nunca em coluna numérica.
+    <button type="button" class="tpl-btn" @onclick="PreencherExemplos">Preencher com exemplos</button>
+</div>
+
 <div class="grade-campos">
     <div class="col-campo">
-        <BBiCampoMascarado Tipo="TipoMascara.Documento" Rotulo="CPF/CNPJ" @bind-Valor="_documento" TextoDica="CPF ou CNPJ" />
+        <BBiCampoMascarado Tipo="TipoMascara.Documento" Rotulo="CPF/CNPJ (detecta sozinho)" @bind-Valor="_documento" TextoDica="CPF ou CNPJ" />
+        <BBiCampoMascarado Tipo="TipoMascara.Cnpj" Rotulo="CNPJ (aceita letras)" @bind-Valor="_cnpj" TextoDica="00.ABC.000/0000-00" />
         <BBiCampoMascarado Tipo="TipoMascara.Telefone" Rotulo="Telefone" @bind-Valor="_telefone" TextoDica="(00) 00000-0000" />
         <BBiCampoMascarado Tipo="TipoMascara.Cep" Rotulo="CEP" @bind-Valor="_cep" TextoDica="00000-000" />
         <BBiCampoMoeda Rotulo="Valor" @bind-Valor="_valor" />
@@ -31,6 +41,7 @@
         <span class="valores-titulo">Valor capturado no binding</span>
         <ul>
             <li><strong>Documento (cru):</strong> <code>@(_documento ?? "—")</code></li>
+            <li><strong>CNPJ (cru, com letras):</strong> <code>@(_cnpj ?? "—")</code></li>
             <li><strong>Telefone (cru):</strong> <code>@(_telefone ?? "—")</code></li>
             <li><strong>CEP (cru):</strong> <code>@(_cep ?? "—")</code></li>
             <li><strong>Valor (decimal):</strong> <code>@(_valor?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "—")</code></li>
@@ -41,8 +52,11 @@
 </div>
 
 @code {
-    /// <summary>Documento capturado (dígitos crus).</summary>
+    /// <summary>Documento capturado (CPF em dígitos; CNPJ pode ter letras).</summary>
     private string? _documento;
+
+    /// <summary>CNPJ capturado (cru — alfanumérico).</summary>
+    private string? _cnpj;
 
     /// <summary>Telefone capturado (dígitos crus).</summary>
     private string? _telefone;
@@ -55,4 +69,15 @@
 
     /// <summary>Data capturada (DateTime nativo).</summary>
     private DateTime? _data;
+
+    /// <summary>Preenche os campos com exemplos válidos, inclusive o CNPJ alfanumérico oficial.</summary>
+    private void PreencherExemplos()
+    {
+        _documento = "12ABC34501DE35";     // CNPJ alfanumérico (exemplo oficial da Receita)
+        _cnpj = "11222333000181";          // CNPJ numérico tradicional — continua válido
+        _telefone = "11987654321";
+        _cep = "01310100";
+        _valor = 1234.56m;
+        _data = new DateTime(2026, 7, 11);
+    }
 }

@@ -93,3 +93,26 @@ li code { color: #93c5fd; word-break: break-all; }
 .col-valores ul { list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; }
 .col-valores code { background: #020617; padding: 2px 6px; border-radius: 4px; color: #6ee7b7; }
 .obs { font-size: 0.82rem; color: #94a3b8; font-style: italic; }
+
+/* Página de campo de template (demo) */
+.tpl-grade { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+@media (max-width: 900px) { .tpl-grade { grid-template-columns: 1fr; } }
+.tpl-col { display: flex; flex-direction: column; gap: 12px; }
+.tpl-painel { padding: 14px; border: 1px solid #1e293b; border-radius: 8px; background: #0b1225; margin-bottom: 16px; }
+.tpl-painel-titulo { font-size: 0.9rem; font-weight: 600; color: #93c5fd; }
+.tpl-saida { margin-top: 12px; }
+.tpl-saida-rotulo { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+.tpl-saida-valor { margin-top: 4px; padding: 9px 11px; border-radius: 6px; background: #020617; color: #6ee7b7; font-size: 0.88rem; border: 1px solid #1e293b; }
+.tpl-saida-valor--pre { white-space: pre-wrap; font-family: inherit; margin: 4px 0 0; }
+.tpl-agregado { margin-top: 14px; padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; background: #4c0519; color: #fecdd3; border: 1px solid #7f1d1d; }
+.tpl-registro { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: #cbd5e1; }
+.tpl-registro code { background: #020617; padding: 2px 6px; border-radius: 4px; color: #93c5fd; }
+
+/* Página de envio programático (demo) */
+.resultado-ok { color: #6ee7b7; font-size: 0.9rem; }
+.resultado-erro { color: #fda4af; font-size: 0.9rem; }
+
+/* Aviso do CNPJ alfanumérico (demo) */
+.aviso-cnpj { padding: 12px 14px; border: 1px solid #1e3a8a; border-radius: 8px; background: #0b1225; color: #cbd5e1; font-size: 0.85rem; margin-bottom: 16px; line-height: 1.6; }
+.aviso-cnpj code { background: #020617; padding: 2px 6px; border-radius: 4px; color: #6ee7b7; }
+.tpl-btn--teste { background: #78350f; color: #fde68a; }

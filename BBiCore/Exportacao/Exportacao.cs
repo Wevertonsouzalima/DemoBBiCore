@@ -26,7 +26,10 @@ namespace BBiCore.Exportacao
         Csv,
 
         /// <summary>Planilha Excel (.xlsx).</summary>
-        Excel
+        Excel,
+
+        /// <summary>Documento PDF (.pdf), paginado e pronto para impressão.</summary>
+        Pdf
     }
 
     // #endregion
@@ -241,12 +244,12 @@ namespace BBiCore.Exportacao
             }
         }
 
-        /// <summary>Formata um valor como texto no padrão brasileiro (para CSV).</summary>
+        /// <summary>Formata um valor como texto no padrão brasileiro. Compartilhado pelo CSV e pelo PDF.</summary>
         /// <param name="valor">Valor bruto.</param>
         /// <param name="formato">Formato .NET opcional.</param>
         /// <param name="cultura">Cultura de formatação.</param>
         /// <returns>Texto formatado.</returns>
-        private static string FormatarTexto(object? valor, string? formato, CultureInfo cultura)
+        internal static string FormatarTexto(object? valor, string? formato, CultureInfo cultura)
         {
             if (valor is null)
                 return string.Empty;
@@ -286,6 +289,18 @@ namespace BBiCore.Exportacao
                 return campo;
 
             return "\"" + campo.Replace("\"", "\"\"") + "\"";
+        }
+
+        /// <summary>Indica se o tipo é numérico (o PDF alinha esses valores à direita).</summary>
+        /// <param name="tipo">Tipo efetivo da coluna.</param>
+        /// <returns>Verdadeiro para inteiros e decimais.</returns>
+        internal static bool EhNumerico(Type tipo)
+        {
+            return tipo == typeof(byte) || tipo == typeof(sbyte)
+                || tipo == typeof(short) || tipo == typeof(ushort)
+                || tipo == typeof(int) || tipo == typeof(uint)
+                || tipo == typeof(long) || tipo == typeof(ulong)
+                || tipo == typeof(decimal) || tipo == typeof(double) || tipo == typeof(float);
         }
 
         /// <summary>Indica se o tipo é "simples" (exportável como uma coluna).</summary>
